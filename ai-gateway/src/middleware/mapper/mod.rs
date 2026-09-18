@@ -185,11 +185,17 @@ where
                 Ok(None)
             }
         } else if resp_parts.status.is_client_error() || resp_parts.status.is_server_error() {
-            let source_error: T::ErrorResponseBody = serde_json::from_slice(&bytes)
-                .map_err(|e| InternalError::Deserialize {
-                    ty: std::any::type_name::<T::ErrorResponseBody>(),
-                    error: e,
-                })?;
+            let source_error: T::ErrorResponseBody = match serde_json::from_slice(&bytes) {
+                Ok(error) => error,
+                Err(error) => {
+                    tracing::warn!(
+                        status = %resp_parts.status,
+                        error = %error,
+                        "unable to parse upstream error response; preserving body",
+                    );
+                    return Ok(Some(bytes));
+                }
+            };
             let target_response: S::ErrorResponseBody = self
                 .converter
                 .try_convert_error(&resp_parts, source_error)
