@@ -191,7 +191,7 @@ where
                     tracing::warn!(
                         status = %resp_parts.status,
                         error = %error,
-                        "unable to parse upstream error response; preserving body",
+                        "unable to parse upstream error response; preserving status and body",
                     );
                     return Ok(Some(bytes));
                 }
