@@ -15,6 +15,51 @@ use http::{Method, Request, StatusCode};
 use serde_json::json;
 use tower::Service;
 
+/// An upstream Gemini error that is not valid OpenAI error JSON should
+/// preserve Gemini's HTTP status instead of becoming a gateway 500.
+#[tokio::test]
+#[serial_test::serial(default_mock)]
+async fn google_preserves_unparseable_error_status() {
+    let mut config = Config::test_default();
+    config.helicone.features = HeliconeFeatures::None;
+    let router_config = RouterConfigs::new(HashMap::from([(
+        RouterId::Named(CompactString::new("my-router")),
+        RouterConfig {
+            load_balance: BalanceConfig::google_gemini(),
+            ..Default::default()
+        },
+    )]));
+    config.routers = router_config;
+    let mock_args = MockArgs::builder()
+        .stubs(HashMap::from([
+            ("error:gemini:generate_content", 1.into()),
+            ("success:minio:upload_request", 0.into()),
+            ("success:jawn:log_request", 0.into()),
+        ]))
+        .build();
+    let mut harness = Harness::builder()
+        .with_config(config)
+        .with_mock_args(mock_args)
+        .build()
+        .await;
+
+    let request_body = axum_core::body::Body::from(
+        serde_json::to_vec(&json!({
+            "model": "gemini/gemini-2.0-flash",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }))
+        .unwrap(),
+    );
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("http://router.helicone.com/router/my-router/chat/completions")
+        .body(request_body)
+        .unwrap();
+
+    let response = harness.call(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 /// Sending a request to https://localhost/router should
 /// result in the proxied request targeting https://api.openai.com/v1/chat/completions
 #[tokio::test]
